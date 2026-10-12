@@ -1,0 +1,29 @@
+{
+  "name": "dig-deep-or-die",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5220 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "preview": "vite preview --host 127.0.0.1 --port 5221 --strictPort",
+    "sim": "tsx tools/sim/run.ts",
+    "build:cg": "tsc --noEmit && vite build --mode crazygames --outDir dist-crazygames",
+    "build:pg": "tsc --noEmit && vite build --mode playgama --outDir dist-playgama",
+    "build:y8": "tsc --noEmit && vite build --mode y8 --outDir dist-y8"
+  },
+  "dependencies": {
+    "@fontsource-variable/nunito": "^5.3.0",
+    "@fontsource/lilita-one": "^5.3.0",
+    "phaser": "3.90.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.3"
+  }
+}

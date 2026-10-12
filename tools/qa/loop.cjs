@@ -1,0 +1,87 @@
+// Real browser input drives the loop. Development state is read for assertions;
+// no teleportation, currency injection, or direct simulation calls in this test.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const {launch,outDir} = require('./pw.cjs');
+const BASE = process.env.BASE || 'http://127.0.0.1:5222/';
+const state = p => p.evaluate(() => {
+  const c=window.__game, g=c.game;
+  return {mode:g.mode, modal:c.ui.modal, depth:g.depth, heat:g.heat, money:g.profile.money, tiles:g.profile.stats.tiles, cargo:g.cargoValue, upgrades:{...g.level}, runs:g.profile.stats.runs, x:g.pod.x, y:g.pod.y, blocked:g.boxBlocked(g.pod.x,g.pod.y), input:c.controls.read(), fps:c.scene.game.loop.actualFps};
+});
+async function held(p,key,ms) { await p.keyboard.down(key);await p.waitForTimeout(ms);await p.keyboard.up(key); }
+(async()=>{
+  const b=await launch();
+  const errors=[];
+  const report={};
+  try {
+    const context=await b.newContext({viewport:{width:1280,height:800},locale:'en-US'});
+    const p=await context.newPage();
+    p.on('pageerror',e=>errors.push(e.stack));
+    await p.goto(BASE+'?fresh&seed=12345');
+    await p.waitForFunction(()=>window.__game?.scene?.landmarksReady);
+    await p.screenshot({path:outDir()+'/desktop-start.png'});
+    const start=await state(p);
+    assert.equal(start.modal,'none');
+    await held(p,'ArrowDown',11000);
+    report.mining=await state(p);
+    assert(report.mining.depth>5);assert(report.mining.tiles>4);assert(report.mining.cargo>0);assert(report.mining.heat>0);
+    await p.screenshot({path:outDir()+'/desktop-mining.png'});
+    await p.keyboard.press('Escape');
+    const paused=await state(p);
+    await p.waitForTimeout(750);
+    const afterPause=await state(p);
+    assert.equal(afterPause.heat,paused.heat);assert.equal(afterPause.y,paused.y);
+    await p.keyboard.press('Escape');
+    await p.keyboard.down('ArrowUp');
+    await p.waitForFunction(()=>window.__game.ui.modal==='workshop',{},{timeout:20000});
+    await p.keyboard.up('ArrowUp');
+    await p.waitForTimeout(1800);
+    report.bank=await state(p);
+    assert(report.bank.money>0);assert.equal(report.bank.cargo,0);
+    await p.screenshot({path:outDir()+'/desktop-workshop.png'});
+    const drill=p.locator('.buy[data-id="drill"]');
+    assert(await drill.isEnabled());
+    await drill.click();
+    report.bought=await state(p);
+    assert.equal(report.bought.upgrades.drill,1);
+    assert.equal(report.bought.money,report.bank.money-50);
+    await p.waitForTimeout(150);
+    await p.goto(BASE);
+    await p.waitForFunction(()=>window.__game?.scene?.landmarksReady);
+    report.reload=await state(p);
+    assert.equal(report.reload.money,report.bought.money);assert.equal(report.reload.upgrades.drill,1);
+    await held(p,'ArrowDown',2200);
+    await p.keyboard.press('Escape');
+    report.secondRun=await state(p);
+    assert(report.secondRun.runs>start.runs);
+    await context.close();
+
+    const mobile=await b.newContext({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true,locale:'pt-BR'});
+    const m=await mobile.newPage();m.on('pageerror',e=>errors.push(e.stack));
+    await m.goto(BASE+'?fresh&seed=12345');
+    await m.waitForFunction(()=>window.__game?.scene?.landmarksReady);
+    await m.screenshot({path:outDir()+'/mobile-start.png'});
+    const cdp=await mobile.newCDPSession(m);
+    const downBox=await m.locator('[data-b="down"]').boundingBox();
+    assert(downBox.width>=44&&downBox.height>=44);
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:downBox.x+downBox.width/2,y:downBox.y+downBox.height/2,id:1}]});
+    await m.waitForTimeout(6500);
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+    report.mobileMining=await state(m);assert(report.mobileMining.tiles>3);assert.equal(report.mobileMining.input.down,false);
+    await m.screenshot({path:outDir()+'/mobile-mining.png'});
+    const upBox=await m.locator('[data-b="up"]').boundingBox();
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:upBox.x+upBox.width/2,y:upBox.y+upBox.height/2,id:2}]});
+    await m.waitForFunction(()=>window.__game.ui.modal==='workshop',{},{timeout:20000});
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await m.waitForTimeout(1500);
+    report.mobileBank=await state(m);assert(report.mobileBank.money>0);
+    await m.screenshot({path:outDir()+'/mobile-workshop.png'});
+    await m.setViewportSize({width:844,height:390});await m.waitForTimeout(400);
+    await m.screenshot({path:outDir()+'/mobile-landscape.png'});
+    report.mobileOverflow=await m.evaluate(()=>document.documentElement.scrollWidth>innerWidth);
+    assert.equal(report.mobileOverflow,false);
+    assert.deepEqual(errors,[]);
+    fs.writeFileSync(outDir()+'/loop-report.json',JSON.stringify(report,null,2));
+    console.log(JSON.stringify(report,null,2));
+  } finally {await b.close();}
+})().catch(e=>{console.error(e);process.exit(1)});
